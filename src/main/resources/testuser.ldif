@@ -1,0 +1,18 @@
+version: 1
+
+dn: uid=testuser,ou=users,ou=system
+objectClass: extensibleObject
+objectClass: organizationalPerson
+objectClass: person
+objectClass: inetOrgPerson
+objectClass: top
+cn: testuser
+sn: testuser
+pwdAttribute: userPassword
+pwdLockout: false
+pwdMaxIdle: 1800
+uid: testuser
+unixFilePath: /testuser
+userPassword:: e1NTSEF9QUJhbUQ2eHZEbk91czBFVDhzWmtpdk9MWXdSYWRzU3B0UnhlK1E9P
+ Q==
+
