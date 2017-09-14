@@ -5,37 +5,26 @@ import static org.apache.directory.ldap.client.api.search.FilterBuilder.and;
 import static org.apache.directory.ldap.client.api.search.FilterBuilder.contains;
 import static org.apache.directory.ldap.client.api.search.FilterBuilder.present;
 
-import org.apache.commons.pool.impl.GenericObjectPool;
 import org.apache.directory.api.ldap.model.entry.Attribute;
 import org.apache.directory.api.ldap.model.entry.Entry;
 import org.apache.directory.api.ldap.model.exception.LdapInvalidAttributeValueException;
 import org.apache.directory.api.ldap.model.message.SearchScope;
 import org.apache.directory.api.ldap.model.name.Dn;
-import org.apache.directory.ldap.client.api.DefaultLdapConnectionFactory;
-import org.apache.directory.ldap.client.api.LdapConnectionConfig;
-import org.apache.directory.ldap.client.api.LdapConnectionPool;
-import org.apache.directory.ldap.client.api.ValidatingPoolableLdapConnectionFactory;
 import org.apache.directory.ldap.client.api.search.FilterBuilder;
 import org.apache.directory.ldap.client.template.EntryMapper;
 import org.apache.directory.ldap.client.template.LdapConnectionTemplate;
 import org.apache.directory.ldap.client.template.exception.PasswordException;
 import org.apache.ftpserver.ftplet.Authentication;
 import org.apache.ftpserver.ftplet.AuthenticationFailedException;
-import org.apache.ftpserver.ftplet.Authority;
 import org.apache.ftpserver.ftplet.FtpException;
 import org.apache.ftpserver.ftplet.User;
 import org.apache.ftpserver.usermanager.UsernamePasswordAuthentication;
 import org.apache.ftpserver.usermanager.impl.AbstractUserManager;
 import org.apache.ftpserver.usermanager.impl.BaseUser;
-import org.apache.ftpserver.usermanager.impl.ConcurrentLoginPermission;
-import org.apache.ftpserver.usermanager.impl.TransferRatePermission;
-import org.apache.ftpserver.usermanager.impl.WritePermission;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Properties;
 
 public final class LdapUserManager extends AbstractUserManager {
 
@@ -54,47 +43,15 @@ public final class LdapUserManager extends AbstractUserManager {
   private static final String OBJECT_CLASS_INET_ORG_PERSON = "inetOrgPerson";
   private static final String OBJECT_CLASS_EXTENSIBLE_OBJECT = "extensibleObject";
 
-  private final LdapUserManagerConfiguration configuration;
+  private final LdapConnectionTemplate ldapConnectionTemplate;
+  private final String userBaseDn;
 
-  private LdapConnectionTemplate ldapConnectionTemplate;
+  public LdapUserManager(
+          final LdapConnectionTemplate ldapConnectionTemplate,
+          final String userBaseDn) {
 
-  public LdapUserManager(final Properties properties) {
-
-    this(new LdapUserManagerConfiguration(properties));
-  }
-
-  public LdapUserManager(final LdapUserManagerConfiguration configuration) {
-
-    LOGGER.debug("configuration = {}", configuration);
-
-    if (null == configuration) {
-      throw new IllegalArgumentException("configuration is null");
-    }
-
-    this.configuration = configuration;
-
-    init();
-  }
-
-  private void init() {
-
-    LdapConnectionConfig ldapConnectionConfig = new LdapConnectionConfig();
-    ldapConnectionConfig.setLdapHost(configuration.getConnectionHost());
-    ldapConnectionConfig.setLdapPort(configuration.getConnectionPort());
-    ldapConnectionConfig.setName(configuration.getConnectionName());
-    ldapConnectionConfig.setCredentials(configuration.getConnectionCredentials());
-
-    GenericObjectPool.Config poolConfig = new GenericObjectPool.Config();
-    poolConfig.maxActive = configuration.getConnectionMaxActive();
-    poolConfig.maxIdle = configuration.getConnectionMaxIdle();
-
-    DefaultLdapConnectionFactory ldapConnectionFactory
-            = new DefaultLdapConnectionFactory(ldapConnectionConfig);
-    ldapConnectionFactory.setTimeOut(configuration.getConnectionTimeOut());
-    ValidatingPoolableLdapConnectionFactory poolableLdapConnectionFactory
-            = new ValidatingPoolableLdapConnectionFactory(ldapConnectionFactory);
-    LdapConnectionPool ldapPool = new LdapConnectionPool(poolableLdapConnectionFactory, poolConfig);
-    ldapConnectionTemplate = new LdapConnectionTemplate(ldapPool);
+    this.ldapConnectionTemplate = ldapConnectionTemplate;
+    this.userBaseDn = userBaseDn;
   }
 
   @Override
@@ -106,8 +63,7 @@ public final class LdapUserManager extends AbstractUserManager {
       throw new IllegalArgumentException("name is null");
     }
 
-    Dn dn = ldapConnectionTemplate.newDn(
-            format("%s=%s,%s", ATTR_UID, name, configuration.getUserBaseDn()));
+    Dn dn = ldapConnectionTemplate.newDn(format("%s=%s,%s", ATTR_UID, name, userBaseDn));
 
     return ldapConnectionTemplate.lookup(dn, entry -> createUser(entry));
   }
@@ -115,15 +71,14 @@ public final class LdapUserManager extends AbstractUserManager {
   @Override
   public String[] getAllUserNames() throws FtpException {
 
-    Dn dn = ldapConnectionTemplate.newDn(configuration.getUserBaseDn());
+    Dn dn = ldapConnectionTemplate.newDn(userBaseDn);
 
     FilterBuilder filter = and(
             present(ATTR_UID),
             contains(ATTR_OBJECT_CLASS, OBJECT_CLASS_INET_ORG_PERSON));
 
     EntryMapper<String> mapper = entry -> toString(entry.get(ATTR_UID));
-    List<String> userNames = ldapConnectionTemplate.search(
-            dn, filter, SearchScope.ONELEVEL, mapper);
+    List<String> userNames = ldapConnectionTemplate.search(dn, filter, SearchScope.ONELEVEL, mapper);
 
     LOGGER.debug("userNames = {}", userNames);
 
@@ -139,8 +94,7 @@ public final class LdapUserManager extends AbstractUserManager {
       throw new IllegalArgumentException("name is null");
     }
 
-    Dn dn = ldapConnectionTemplate.newDn(
-            format("%s=%s,%s", ATTR_UID, name, configuration.getUserBaseDn()));
+    Dn dn = ldapConnectionTemplate.newDn(format("%s=%s,%s", ATTR_UID, name, userBaseDn));
 
     ldapConnectionTemplate.delete(dn);
   }
@@ -154,8 +108,7 @@ public final class LdapUserManager extends AbstractUserManager {
       throw new IllegalArgumentException("user is null");
     }
 
-    Dn dn = ldapConnectionTemplate.newDn(
-            format("%s=%s,%s", ATTR_UID, user.getName(), configuration.getUserBaseDn()));
+    Dn dn = ldapConnectionTemplate.newDn(format("%s=%s,%s", ATTR_UID, user.getName(), userBaseDn));
 
     String[] objectClasses = {
       OBJECT_CLASS_INET_ORG_PERSON, OBJECT_CLASS_EXTENSIBLE_OBJECT
@@ -188,8 +141,7 @@ public final class LdapUserManager extends AbstractUserManager {
   }
 
   @Override
-  public User authenticate(final Authentication auth)
-          throws AuthenticationFailedException {
+  public User authenticate(final Authentication auth) throws AuthenticationFailedException {
 
     LOGGER.debug("auth = {}", auth);
 
@@ -207,8 +159,7 @@ public final class LdapUserManager extends AbstractUserManager {
     String username = usernamePasswordAuth.getUsername();
     String password = usernamePasswordAuth.getPassword();
 
-    Dn dn = ldapConnectionTemplate.newDn(
-            format("%s=%s,%s", ATTR_UID, username, configuration.getUserBaseDn()));
+    Dn dn = ldapConnectionTemplate.newDn(format("%s=%s,%s", ATTR_UID, username, userBaseDn));
 
     try {
       ldapConnectionTemplate.authenticate(dn, password.toCharArray());
@@ -225,48 +176,28 @@ public final class LdapUserManager extends AbstractUserManager {
     }
   }
 
-  private User createUser(final Entry entry)
-          throws LdapInvalidAttributeValueException {
+  private User createUser(final Entry entry) throws LdapInvalidAttributeValueException {
 
     BaseUser user = new BaseUser();
     user.setName(toString(entry.get(ATTR_UID)));
     user.setHomeDirectory(toString(entry.get(ATTR_UNIX_FILE_PATH)));
     user.setMaxIdleTime(toInt(entry.get(ATTR_PWD_MAX_IDLE)));
     user.setEnabled(!toBoolean(entry.get(ATTR_PWD_LOCKOUT)));
-    user.setAuthorities(createAuthorities());
 
     return user;
   }
 
-  private List<Authority> createAuthorities() {
-
-    List<Authority> authorities = new ArrayList<>();
-
-    authorities.add(new WritePermission());
-    authorities.add(new ConcurrentLoginPermission(
-            configuration.getMaxConcurrentLogins(),
-            configuration.getMaxConcurrentLoginsPerIp()));
-    authorities.add(new TransferRatePermission(
-            configuration.getDownloadRate(),
-            configuration.getUploadRate()));
-
-    return authorities;
-  }
-
-  private boolean toBoolean(final Attribute attribute)
-          throws LdapInvalidAttributeValueException {
+  private boolean toBoolean(final Attribute attribute) throws LdapInvalidAttributeValueException {
 
     return Boolean.parseBoolean(toString(attribute));
   }
 
-  private int toInt(final Attribute attribute)
-          throws LdapInvalidAttributeValueException {
+  private int toInt(final Attribute attribute) throws LdapInvalidAttributeValueException {
 
     return Integer.parseInt(toString(attribute));
   }
 
-  private String toString(final Attribute attribute)
-          throws LdapInvalidAttributeValueException {
+  private String toString(final Attribute attribute) throws LdapInvalidAttributeValueException {
 
     return attribute.getString();
   }
