@@ -1,9 +1,9 @@
 package org.adrianwalker.ftpserver.usermanager.ldap;
 
-import static java.lang.String.format;
 import static org.apache.directory.ldap.client.api.search.FilterBuilder.and;
 import static org.apache.directory.ldap.client.api.search.FilterBuilder.contains;
 import static org.apache.directory.ldap.client.api.search.FilterBuilder.present;
+import static java.lang.String.format;
 
 import org.apache.directory.api.ldap.model.entry.Attribute;
 import org.apache.directory.api.ldap.model.entry.Entry;
@@ -16,15 +16,20 @@ import org.apache.directory.ldap.client.template.LdapConnectionTemplate;
 import org.apache.directory.ldap.client.template.exception.PasswordException;
 import org.apache.ftpserver.ftplet.Authentication;
 import org.apache.ftpserver.ftplet.AuthenticationFailedException;
+import org.apache.ftpserver.ftplet.Authority;
 import org.apache.ftpserver.ftplet.FtpException;
 import org.apache.ftpserver.ftplet.User;
 import org.apache.ftpserver.usermanager.UsernamePasswordAuthentication;
 import org.apache.ftpserver.usermanager.impl.AbstractUserManager;
-import org.apache.ftpserver.usermanager.impl.BaseUser;
+import org.apache.ftpserver.usermanager.impl.ConcurrentLoginPermission;
+import org.apache.ftpserver.usermanager.impl.TransferRatePermission;
+import org.apache.ftpserver.usermanager.impl.WritePermission;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.List;
+import org.apache.ftpserver.usermanager.UserFactory;
 
 public final class LdapUserManager extends AbstractUserManager {
 
@@ -46,12 +51,32 @@ public final class LdapUserManager extends AbstractUserManager {
   private final LdapConnectionTemplate ldapConnectionTemplate;
   private final String userBaseDn;
 
+  private List<Authority> authorities;
+
   public LdapUserManager(
           final LdapConnectionTemplate ldapConnectionTemplate,
           final String userBaseDn) {
 
     this.ldapConnectionTemplate = ldapConnectionTemplate;
     this.userBaseDn = userBaseDn;
+  }
+
+  public List<Authority> getAuthorities() {
+
+    if (null == authorities) {
+
+      authorities = new ArrayList<>();
+      authorities.add(new WritePermission());
+      authorities.add(new ConcurrentLoginPermission(0, 0));
+      authorities.add(new TransferRatePermission(0, 0));
+    }
+
+    return authorities;
+  }
+
+  public void setAuthorities(final List<Authority> authorities) {
+
+    this.authorities = authorities;
   }
 
   @Override
@@ -178,13 +203,14 @@ public final class LdapUserManager extends AbstractUserManager {
 
   private User createUser(final Entry entry) throws LdapInvalidAttributeValueException {
 
-    BaseUser user = new BaseUser();
-    user.setName(toString(entry.get(ATTR_UID)));
-    user.setHomeDirectory(toString(entry.get(ATTR_UNIX_FILE_PATH)));
-    user.setMaxIdleTime(toInt(entry.get(ATTR_PWD_MAX_IDLE)));
-    user.setEnabled(!toBoolean(entry.get(ATTR_PWD_LOCKOUT)));
+    UserFactory factory = new UserFactory();
+    factory.setName(toString(entry.get(ATTR_UID)));
+    factory.setHomeDirectory(toString(entry.get(ATTR_UNIX_FILE_PATH)));
+    factory.setMaxIdleTime(toInt(entry.get(ATTR_PWD_MAX_IDLE)));
+    factory.setEnabled(!toBoolean(entry.get(ATTR_PWD_LOCKOUT)));
+    factory.setAuthorities(getAuthorities());
 
-    return user;
+    return factory.createUser();
   }
 
   private boolean toBoolean(final Attribute attribute) throws LdapInvalidAttributeValueException {
